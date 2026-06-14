@@ -1,0 +1,49 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# API Keys and Credentials
+.env
+.env.local
+secrets.json
+credentials.json
+tiktok_cookies.json
+facebook_token.json
+youtube_oauth.json
+
+# Generated videos and files
+output/
+*.mp4
+*.webm
+*.mov
+downloads/
+temp/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution
+build/
+dist/
+*.egg-info/
