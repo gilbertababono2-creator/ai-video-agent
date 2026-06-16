@@ -14,13 +14,11 @@ import json
 from pathlib import Path
 from typing import List, Optional, Tuple
 import numpy as np
-from moviepy.editor import (
+from moviepy import (
     ImageClip, VideoFileClip, ColorClip, TextClip,
     CompositeVideoClip, concatenate_videoclips, CompositeAudioClip,
-    AudioClip, AudioFileClip
+    AudioClip, AudioFileClip, vfx, concatenate_audioclips
 )
-from moviepy.video.fx.resize import resize
-from moviepy.video.fx.speedx import speedx
 from PIL import Image, ImageDraw, ImageFont
 
 from agent.logger import setup_logger
@@ -157,7 +155,7 @@ class VideoGenerator:
             
             # Ensure target duration
             if final_clip.duration > duration:
-                final_clip = final_clip.speedx(final_clip.duration / duration)
+                final_clip = final_clip.with_effects([vfx.MultiplySpeed(final_clip.duration / duration)])
             
             output_path = self.output_dir / f"video_from_videos_{len(video_paths)}_clips.mp4"
             self._render_video(final_clip, str(output_path))
@@ -210,34 +208,41 @@ class VideoGenerator:
             # Create text clip
             txt_clip = TextClip(
                 text,
-                fontsize=fontsize,
+                font_size=fontsize,
                 color=color,
                 method="caption",
                 size=(self.width - 100, None),
-                align="center",
+                text_align="center",
                 font="Arial-Bold"
             )
-            txt_clip = txt_clip.set_duration(end_time - start_time)
-            txt_clip = txt_clip.set_start(start_time)
+            txt_clip = txt_clip.with_duration(end_time - start_time)
+            txt_clip = txt_clip.with_start(start_time)
             
             # Position text
             if position == "top":
-                txt_clip = txt_clip.set_position(("center", 100))
+                txt_clip = txt_clip.with_position(("center", 100))
             elif position == "center":
-                txt_clip = txt_clip.set_position(("center", "center"))
+                txt_clip = txt_clip.with_position(("center", "center"))
             elif position == "bottom":
-                txt_clip = txt_clip.set_position(("center", self.height - 200))
+                txt_clip = txt_clip.with_position(("center", self.height - 200))
             
             # Optional background
             if background_color:
+                bg_h = int(txt_clip.h + 40)
+                # Calculate y position for background
+                if position == "top":
+                    bg_y = 100 + (txt_clip.h / 2) - (bg_h / 2)
+                elif position == "center":
+                    bg_y = (self.height / 2) - (bg_h / 2)
+                elif position == "bottom":
+                    bg_y = (self.height - 200) + (txt_clip.h / 2) - (bg_h / 2)
+                else:
+                    bg_y = (self.height / 2) - (bg_h / 2)
+
                 bg_clip = ColorClip(
-                    size=(self.width, int(txt_clip.h + 40)),
+                    size=(self.width, bg_h),
                     color=self._parse_color(background_color)
-                )
-                bg_clip = bg_clip.set_duration(end_time - start_time)
-                bg_clip = bg_clip.set_start(start_time)
-                bg_clip = bg_clip.set_position((0, txt_clip.y - 20))
-                bg_clip = bg_clip.set_opacity(background_opacity)
+                ).with_duration(end_time - start_time).with_start(start_time).with_position((0, bg_y)).with_opacity(background_opacity)
                 
                 # Composite with background
                 composite = CompositeVideoClip([video, bg_clip, txt_clip])
@@ -287,26 +292,24 @@ class VideoGenerator:
             for i, sub in enumerate(subtitles):
                 txt_clip = TextClip(
                     sub["text"],
-                    fontsize=fontsize,
+                    font_size=fontsize,
                     color=color,
                     method="caption",
                     size=(self.width - 100, None),
-                    align="center",
+                    text_align="center",
                     font="Arial"
                 )
-                txt_clip = txt_clip.set_duration(sub["end"] - sub["start"])
-                txt_clip = txt_clip.set_start(sub["start"])
-                txt_clip = txt_clip.set_position(("center", self.height - 150))
+                txt_clip = txt_clip.with_duration(sub["end"] - sub["start"])
+                txt_clip = txt_clip.with_start(sub["start"])
+                txt_clip = txt_clip.with_position(("center", self.height - 150))
                 
                 # Background for readability
+                bg_h = int(txt_clip.h + 20)
+                bg_y = (self.height - 150) + (txt_clip.h / 2) - (bg_h / 2)
                 bg_clip = ColorClip(
-                    size=(self.width, int(txt_clip.h + 20)),
+                    size=(self.width, bg_h),
                     color=self._parse_color(background_color)
-                )
-                bg_clip = bg_clip.set_duration(sub["end"] - sub["start"])
-                bg_clip = bg_clip.set_start(sub["start"])
-                bg_clip = bg_clip.set_position((0, self.height - 150 - int(txt_clip.h / 2)))
-                bg_clip = bg_clip.set_opacity(0.8)
+                ).with_duration(sub["end"] - sub["start"]).with_start(sub["start"]).with_position((0, bg_y)).with_opacity(0.8)
                 
                 subtitle_clips.append(bg_clip)
                 subtitle_clips.append(txt_clip)
@@ -359,18 +362,18 @@ class VideoGenerator:
                 # Loop audio if too short
                 repeats = int(video.duration / new_audio.duration) + 1
                 audio_clips = [new_audio] * repeats
-                new_audio = concatenate_videoclips(audio_clips).subclipped(0, video.duration)
+                new_audio = concatenate_audioclips(audio_clips).subclipped(0, video.duration)
             
             # Apply volume
-            new_audio = new_audio.volumex(volume)
+            new_audio = new_audio.with_volume_scaled(volume)
             
             if mix_with_original and video.audio is not None:
                 # Mix original and new audio
                 composite_audio = CompositeAudioClip([video.audio, new_audio])
-                video = video.set_audio(composite_audio)
+                video = video.with_audio(composite_audio)
             else:
                 # Replace audio
-                video = video.set_audio(new_audio)
+                video = video.with_audio(new_audio)
             
             # Output
             output_path = self.output_dir / f"video_with_audio_{Path(video_path).stem}.mp4"
@@ -411,10 +414,9 @@ class VideoGenerator:
                 color = self._parse_color(fill_color)
                 canvas = ColorClip(
                     size=(video.w, new_height),
-                    color=color,
-                    duration=video.duration
-                )
-                video = CompositeVideoClip([canvas, video.set_position(("center", padding))])
+                    color=color
+                ).with_duration(video.duration)
+                video = CompositeVideoClip([canvas, video.with_position(("center", padding))])
             else:
                 # Video is too tall, add left/right bars
                 new_width = int(video.h * target_ratio)
@@ -423,13 +425,12 @@ class VideoGenerator:
                 color = self._parse_color(fill_color)
                 canvas = ColorClip(
                     size=(new_width, video.h),
-                    color=color,
-                    duration=video.duration
-                )
-                video = CompositeVideoClip([canvas, video.set_position((padding, "center"))])
+                    color=color
+                ).with_duration(video.duration)
+                video = CompositeVideoClip([canvas, video.with_position((padding, "center"))])
             
             # Final resize to exactly 1080x1920
-            video = resize(video, newsize=(self.width, self.height))
+            video = video.resized(new_size=(self.width, self.height))
             
             output_path = self.output_dir / f"video_vertical_{Path(video_path).stem}.mp4"
             self._render_video(video, str(output_path))
@@ -477,7 +478,7 @@ class VideoGenerator:
         
         # Create clip
         clip = ImageClip(str(temp_path))
-        clip = clip.set_duration(duration)
+        clip = clip.with_duration(duration)
         
         return clip
     
@@ -497,23 +498,23 @@ class VideoGenerator:
             # Video is too wide, crop sides
             new_width = int(video.h * target_aspect)
             x_offset = (video.w - new_width) // 2
-            video = video.crop(x1=x_offset, x2=x_offset + new_width)
+            video = video.cropped(x1=x_offset, x2=x_offset + new_width)
         else:
             # Video is too tall, crop top/bottom
             new_height = int(video.w / target_aspect)
             y_offset = (video.h - new_height) // 2
-            video = video.crop(y1=y_offset, y2=y_offset + new_height)
+            video = video.cropped(y1=y_offset, y2=y_offset + new_height)
         
         # Resize to exact dimensions
-        video = resize(video, newsize=(self.width, self.height))
+        video = video.resized(new_size=(self.width, self.height))
         
         # Adjust duration
         if video.duration > duration:
-            video = video.speedx(video.duration / duration)
+            video = video.with_effects([vfx.MultiplySpeed(video.duration / duration)])
         elif video.duration < duration:
-            video = video.speedx(video.duration / duration)
+            video = video.with_effects([vfx.MultiplySpeed(video.duration / duration)])
         
-        return video.set_duration(duration)
+        return video.with_duration(duration)
     
     def _apply_transitions(
         self,
